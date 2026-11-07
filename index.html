@@ -1,0 +1,97 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#123b35"><title>Ramstein Commissary Route</title><style>
+:root{font-family:system-ui,-apple-system,sans-serif;color:#182a26;background:#f5f7f5}*{box-sizing:border-box}body{margin:0}header{background:#123b35;color:white;padding:22px max(16px,calc((100vw - 900px)/2))}h1{margin:0;font-size:1.5rem}header p{opacity:.8;margin:6px 0 0}main{max-width:900px;margin:auto;padding:20px 14px 80px}.panel,.section{background:white;border:1px solid #dce6df;border-radius:16px;padding:18px;margin-bottom:16px}textarea{width:100%;height:195px;padding:14px;border:1px solid #a7b9af;border-radius:10px;font:inherit;resize:vertical}button,select,input{font:inherit}button{cursor:pointer;border:0;border-radius:9px;padding:11px 16px;background:#136451;color:white;font-weight:650}button.secondary{background:#e8f0eb;color:#173d33}button:disabled{opacity:.5}.actions{display:flex;flex-wrap:wrap;gap:9px;margin-top:12px}.muted{color:#64736c;font-size:.9rem}.status{font-size:.9rem;margin:12px 0}.group-title{display:flex;justify-content:space-between;align-items:center;gap:12px;margin:0 0 10px}.group-title h2{margin:0;font-size:1.1rem}.item{border-top:1px solid #edf0ed;padding:12px 0;display:flex;align-items:start;gap:10px}.item input[type=checkbox]{width:22px;height:22px;accent-color:#136451;flex-shrink:0}.item-main{flex:1;min-width:0}.item-name{font-weight:650}.checked .item-name{text-decoration:line-through;color:#7a877f}.details{font-size:.82rem;color:#617268;margin-top:4px;overflow-wrap:anywhere}.item-controls{display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap}select{max-width:100%;padding:7px;border:1px solid #c6d4ca;border-radius:8px;background:#fff}.pill{font-size:.72rem;padding:4px 7px;border-radius:7px;background:#edf3ef;color:#36574b}.warning{background:#fff4d7;color:#705116}.toprow{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}.hidden{display:none}.smallbtn{padding:7px 10px;font-size:.8rem}footer{color:#68776f;font-size:.82rem;margin-top:18px}label{display:block;margin-bottom:8px;font-weight:650}
+</style></head><body><header><h1>Ramstein Commissary Route</h1><p>Paste a list. Find the aisles. Shop in order.</p></header><main><section class="panel"><label for="raw">Your grocery list</label><textarea id="raw" placeholder="Paste an Apple Notes checklist or grocery list here..."></textarea><div class="actions"><button id="organize">Organize by aisle</button><button class="secondary" id="example">Load example</button><button class="secondary" id="clear">Clear list</button></div><div id="status" class="status muted">Loading commissary catalog…</div></section><section id="results" class="hidden"><div class="toprow"><h2>Shopping route</h2><div class="actions"><button class="secondary smallbtn" id="copy">Copy organized list</button><button class="secondary smallbtn" id="resetchecks">Uncheck all</button></div></div><p id="progress" class="muted"></p><div id="groups"></div></section><footer>Local prototype: the list stays in this browser. Sharing between phones and live catalog updates will be added later. Aisles come from the downloaded Commissary catalog; picker walking order may differ from your preferred route.</footer></main><script>
+let catalog=[],aisles=[],items=[];const $=id=>document.getElementById(id);const norm=s=>String(s||'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();const tokens=s=>norm(s).split(' ').filter(x=>x.length>1&&!['the','and','or','for','with','style','large','size','bottle','regular','pkg','pack'].includes(x));const escapeHTML=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const synonyms={"bars keeper friend":"bar keepers friend","patties":"patties","pattie s":"patties","ramens":"ramen","chick fil a":"chick fil a","no bake":"no bake"};function canonical(s){s=norm(s);for(const [a,b] of Object.entries(synonyms))s=s.replaceAll(a,b);return s}
+function parse(text){
+ const lines=text.split(/\r?\n/).map(s=>s.replace(/^\s*(?:[-*•]\s*)?(?:\[[ xX]\]\s*)?/,'').replace(/^\s*\d+[.)]\s*/,'').trim()).filter(Boolean);
+ const out=[];
+ for(const line of lines){
+  const ramen=line.match(/^(?:ramens?|instant noodles?)\s+(.+)$/i);
+  if(ramen && /\s*&\s*/.test(ramen[1])){
+   for(const part of ramen[1].split(/\s*&\s*/)){
+    const m=part.trim().match(/^(.*?)\s*(?:\((\d+)\)|[x×]\s*(\d+))?\s*$/i);
+    out.push({text:m[1].trim()+' ramen',qty:Number(m[2]||m[3]||1),checked:false});
+   }
+   continue;
+  }
+  if(/chicken\s+patt(?:ies|ie.s)\s+regular\s*&\s*spicy/i.test(line)){
+   out.push({text:'Chicken patties regular',qty:1,checked:false},{text:'Chicken patties spicy',qty:1,checked:false});continue;
+  }
+  const m=line.match(/^(.*?)(?:\s*\((\d+)\)|\s*[x×]\s*(\d+))\s*$/i);
+  out.push({text:m?m[1].trim():line,qty:m?Number(m[2]||m[3]):1,checked:false});
+ }
+ return out;
+}
+const groupsOfWords={
+ 'rum':/\b(rum|bacardi|don q)\b/i,
+ 'ramen':/\b(ramen|noodles?)\b/i,
+ 'chicken patties':/\bchicken\b.*\bpatties\b/i,
+ 'cheesecake filling':/\b(cheesecake|no bake)\b/i,
+ 'cleaner':/\b(cleaner|cleaning|bar keepers friend)\b/i,
+ 'sauce':/\b(sauce|dressing|condiment)\b/i,
+ 'turkey sausage':/\bturkey\b.*\bsausage\b/i
+};
+function match(item){
+ const q=canonical(item.text);
+ const isRum=/\b(rum|bacardi|don q)\b/.test(q);
+ const isRamen=/\bramen\b/.test(q);
+ const isPatties=/\bchicken\b.*\bpatties\b/.test(q);
+ const isCleaner=/\bbar\s*keepers?\s*friend\b/.test(q);
+ const isSauce=/\bchick\s*fil\s*a\b/.test(q);
+ const isCheesecake=/\bphiladelphia\b.*\bcheesecake\b/.test(q);
+ const isTurkey=/\bturkey\s+sausage\b/.test(q);
+ let matches=[];
+ if(isRum)matches=catalog.filter(p=>/\b(rum|bacardi|don q)\b/i.test(p.name+' '+p.brand));
+ else if(isRamen)matches=catalog.filter(p=>/\bramen\b/i.test(p.name));
+ else if(isPatties)matches=catalog.filter(p=>/\bchicken\b.*\bpatties\b/i.test(p.name) && (/\bspicy\b/.test(q)===/\bspicy\b/i.test(p.name)));
+ else if(isCleaner)matches=catalog.filter(p=>/bar\s*keepers?\s*friend/i.test(p.name));
+ else if(isSauce)matches=catalog.filter(p=>/chick[ -]?fil[ -]?a/i.test(p.name) && /sauce/i.test(p.name));
+ else if(isCheesecake)matches=catalog.filter(p=>/philadelphia/i.test(p.name) && /cheesecake/i.test(p.name));
+ else if(isTurkey)matches=catalog.filter(p=>/turkey/i.test(p.name) && /sausage/i.test(p.name));
+ else {
+  const ts=tokens(q);
+  matches=catalog.filter(p=>{const n=canonical(p.name+' '+p.brand);return ts.length && ts.every(t=>n.split(' ').some(w=>w===t||(t.length>=5&&w.startsWith(t))))});
+ }
+ const known=matches.filter(p=>p.aisle);
+ const locCounts=new Map();
+ for(const p of known){const old=locCounts.get(p.aisle)||{n:0,order:9999};old.n++;old.order=Math.min(old.order,Number(p.walk_order)||9999);locCounts.set(p.aisle,old)}
+ const ordered=[...locCounts.entries()].sort((a,b)=>b[1].n-a[1].n);
+ let loc='',order=9999,confidence='unknown',matched='';
+ if(ordered.length===1){loc=ordered[0][0];order=ordered[0][1].order;confidence=matches.length===1?'matched':'suggested';matched=known[0]?.name||''}
+ else if(ordered.length>1 && isRamen && ordered[0][1].n/known.length>=.8){loc=ordered[0][0];order=ordered[0][1].order;confidence='suggested';matched=known[0]?.name||''}
+ // Category-based aisle suggestion: derive the actual aisle from related catalog items.
+ // Require a strong majority, and label the result as suggested, never verified.
+ function suggestByCategory(patterns, minEvidence=3, threshold=.70) {
+   const related=catalog.filter(p=>p.aisle && patterns.some(re=>re.test(canonical(p.name))));
+   const counts=new Map();
+   for(const p of related){const x=counts.get(p.aisle)||{count:0,order:9999,example:p.name};x.count++;x.order=Math.min(x.order,Number(p.walk_order)||9999);counts.set(p.aisle,x)}
+   const ranked=[...counts.entries()].sort((a,b)=>b[1].count-a[1].count);
+   if(!ranked.length || related.length<minEvidence || ranked[0][1].count/related.length<threshold)return null;
+   return {aisle:ranked[0][0],order:ranked[0][1].order,matched:ranked[0][1].example,confidence:'suggested'};
+ }
+ if(!loc && isCleaner){
+   const suggestion=suggestByCategory([/\bcleaner\b/,/\bscour(?:ing)?\b/,/\bpowder cleanser\b/,/\bscrub\b/],10,.70);
+   if(suggestion){({aisle:loc,order,matched,confidence}=suggestion)}
+ }
+ // User-confirmed section: Tyson chicken patties are in frozen foods.
+ // No specific freezer aisle was confirmed, so don't invent one.
+ if(!loc && isPatties){loc='Frozen Foods';order=9000;matched='User-confirmed section (specific freezer aisle unknown)';confidence='remembered'}
+ // Generic category inference for common groceries; only suggest when catalog
+ // evidence strongly agrees on one aisle.
+ if(!loc && !isRum && !isCheesecake && !isPatties && !isCleaner){
+   const patterns = isSauce ? [/\bsauce\b/,/\bcondiment\b/] :
+     isTurkey ? [/\bturkey sausage\b/,/\bsausage\b/] :
+     /\bpaper towels?\b/.test(q) ? [/\bpaper towels?\b/] : null;
+   if(patterns){const suggestion=suggestByCategory(patterns,5,.8);if(suggestion){({aisle:loc,order,matched,confidence}=suggestion)}}
+ }
+ // For ambiguous or absent catalog entries, do not invent a location.
+ // Explicitly avoid substituting Jell-O cheesecake mix for Philadelphia filling.
+ if(isCheesecake && !matches.length){loc='';confidence='unknown'}
+ return {...item,aisle:loc,order,matched,confidence};
+}
+function save(){localStorage.setItem('ramstein-list-v3',JSON.stringify({raw:$('raw').value,items}))}function sortedGroups(){const groups=new Map();for(const x of items){let key=x.aisle||'Location Unknown';if(!groups.has(key))groups.set(key,{aisle:key,order:x.order||9999,items:[]});let g=groups.get(key);g.order=Math.min(g.order,x.order||9999);g.items.push(x)}return [...groups.values()].sort((a,b)=>a.order-b.order||a.aisle.localeCompare(b.aisle))}
+function render(){const groups=sortedGroups();$('results').classList.toggle('hidden',!items.length);$('progress').textContent=`${items.filter(x=>x.checked).length} of ${items.length} items collected · ${items.filter(x=>!x.aisle).length} locations need review`;$('groups').innerHTML=groups.map(g=>`<div class="section"><div class="group-title"><h2>${escapeHTML(g.aisle)}</h2><span class="pill">${g.items.length} item${g.items.length===1?'':'s'}</span></div>${g.items.map(x=>{let i=items.indexOf(x);return `<div class="item ${x.checked?'checked':''}"><input type="checkbox" data-check="${i}" ${x.checked?'checked':''} aria-label="Collected ${escapeHTML(x.text)}"><div class="item-main"><div class="item-name">${escapeHTML(x.text)}${x.qty>1?' × '+x.qty:''}</div><div class="details">${x.confidence==='unknown'?'No reliable catalog location':x.confidence==='suggested'?'Suggested from similar catalog products — exact item not confirmed':x.confidence==='remembered'?'Section confirmed by shopper':'Catalog match'}${x.matched?' · '+escapeHTML(x.matched):''}</div><div class="item-controls"><select data-aisle="${i}" aria-label="Change aisle for ${escapeHTML(x.text)}"><option value="">Location Unknown</option>${aisles.map(a=>`<option value="${escapeHTML(a.name)}" ${x.aisle===a.name?'selected':''}>${escapeHTML(a.name)}</option>`).join('')}</select><span class="pill ${x.confidence==='unknown'?'warning':''}">${x.confidence}</span></div></div></div>`}).join('')}</div>`).join('');document.querySelectorAll('[data-check]').forEach(el=>el.onchange=()=>{items[+el.dataset.check].checked=el.checked;save();render()});document.querySelectorAll('[data-aisle]').forEach(el=>el.onchange=()=>{let x=items[+el.dataset.aisle];x.aisle=el.value;x.order=aisles.find(a=>a.name===el.value)?.order||9999;x.confidence='manual';save();render()})}
+$('organize').onclick=()=>{items=parse($('raw').value).map(match);save();render()};$('example').onclick=()=>{$('raw').value='- [ ] Philadelphia no bake cheesecake filling\n- [ ] Bars keeper friend cleaner\n- [ ] Don Q or Bacardi (white rum)\n- [ ] Chicken Pattie’s regular & spicy\n- [ ] Chick fil a sauce bottle\n- [ ] Turkey sausage\n- [ ] Ramens green (8) & brown (6)';$('organize').click()};$('clear').onclick=()=>{if(confirm('Clear the current shopping list?')){$('raw').value='';items=[];save();render()}};$('resetchecks').onclick=()=>{items.forEach(x=>x.checked=false);save();render()};$('copy').onclick=async()=>{const s=sortedGroups().map(g=>g.aisle+'\n'+g.items.map(x=>'- ['+(x.checked?'x':' ')+'] '+x.text+(x.qty>1?' × '+x.qty:'')).join('\n')).join('\n\n');try{await navigator.clipboard.writeText(s);$('copy').textContent='Copied!';setTimeout(()=>$('copy').textContent='Copy organized list',1400)}catch(e){prompt('Copy your list:',s)}};
+(async()=>{try{const res=await fetch('./catalog.json');if(!res.ok)throw Error('Catalog not found');catalog=await res.json();let by=new Map();for(const p of catalog){if(!p.aisle)continue;let o=+p.walk_order||9999;by.set(p.aisle,Math.min(by.get(p.aisle)||9999,o))}aisles=[...by.entries()].map(([name,order])=>({name,order})).sort((a,b)=>a.order-b.order||a.name.localeCompare(b.name));$('status').textContent=`Catalog ready: ${catalog.length.toLocaleString()} products · Smart aisle suggestions enabled. Paste a list or load the example.`;const prior=JSON.parse(localStorage.getItem('ramstein-list-v3')||'null');if(prior){$('raw').value=prior.raw||'';items=prior.items||[];render()}}catch(e){$('status').textContent='Catalog could not load. Start the local server using the instructions in README.txt.';console.error(e)}})();
+</script></body></html>
